@@ -75,9 +75,9 @@ docker compose up --build
 # App + API on http://localhost:8000, data persisted in a named volume
 ```
 
-> Note: the Docker build is code-reviewed but has not yet been smoke-tested on a
-> machine with Docker installed. If it misbehaves, the local quick start above is
-> the verified path — please open an issue.
+Smoke-tested end-to-end: two-stage build (frontend compiled inside the image),
+health check, static frontend serving, token auth rejection, authenticated
+ingest, and data persistence across container restarts via the named volume.
 
 ## CI integration
 
