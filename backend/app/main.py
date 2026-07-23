@@ -72,7 +72,7 @@ async def ingest_endpoint(
     commit_sha: str = Query(..., min_length=1, max_length=64),
     branch: str = Query(default="main", max_length=255),
     ci_run_id: str = Query(default="", max_length=255),
-    project: str = Query(default="default", max_length=255),
+    project: str = Query(default="default", min_length=1, max_length=255),
     report: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
 ):
@@ -226,7 +226,7 @@ def set_quarantine(
 )
 def quarantine_list(
     db: Session = Depends(get_db),
-    project: str = Query(default="default", max_length=255),
+    project: str = Query(default="default", min_length=1, max_length=255),
 ):
     rows = db.execute(
         select(TestCase)

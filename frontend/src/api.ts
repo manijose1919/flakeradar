@@ -47,13 +47,17 @@ async function getJson<T>(url: string): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
-const projectQuery = (project?: string) =>
-  project && project !== "All" ? `&project=${encodeURIComponent(project)}` : "";
+const projectParam = (project?: string) =>
+  project && project !== "All" ? `project=${encodeURIComponent(project)}` : "";
 
-export const fetchSummary = (project?: string) =>
-  getJson<Summary>(`/api/summary?_=1${projectQuery(project)}`);
-export const fetchTests = (project?: string) =>
-  getJson<TestCase[]>(`/api/tests?limit=200${projectQuery(project)}`);
+export const fetchSummary = (project?: string) => {
+  const q = projectParam(project);
+  return getJson<Summary>(`/api/summary${q ? `?${q}` : ""}`);
+};
+export const fetchTests = (project?: string) => {
+  const q = projectParam(project);
+  return getJson<TestCase[]>(`/api/tests?limit=200${q ? `&${q}` : ""}`);
+};
 export const fetchHistory = (id: number) =>
   getJson<History>(`/api/tests/${id}/history?limit=60`);
 export const fetchProjects = () => getJson<string[]>("/api/projects");

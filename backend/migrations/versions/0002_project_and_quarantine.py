@@ -33,6 +33,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # NOTE: this restores a UNIQUE index on `fingerprint` alone. It only succeeds
+    # if no fingerprint is shared across projects — i.e. before multi-project data
+    # exists. Once two projects share a test fingerprint (the point of this
+    # migration), downgrade is not supported and will fail on the unique index.
     with op.batch_alter_table("test_runs", schema=None) as batch:
         batch.drop_column("project")
     with op.batch_alter_table("test_cases", schema=None) as batch:
