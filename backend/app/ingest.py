@@ -75,28 +75,31 @@ def parse_junit_xml(content: bytes) -> list[ParsedCase]:
     return parsed
 
 
-def _select_by_fingerprint(db: Session, fp: str) -> TestCase | None:
+def _select_case(db: Session, project: str, fp: str) -> TestCase | None:
     return db.execute(
-        select(TestCase).where(TestCase.fingerprint == fp)
+        select(TestCase).where(
+            TestCase.project == project, TestCase.fingerprint == fp
+        )
     ).scalar_one_or_none()
 
 
-def _get_or_create_case(db: Session, pc: ParsedCase, fp: str) -> TestCase:
+def _get_or_create_case(db: Session, pc: ParsedCase, project: str, fp: str) -> TestCase:
     """Get-or-create guarded against the concurrent-first-ingest race:
     two CI jobs reporting a brand-new test at the same time both SELECT
-    nothing, then one INSERT loses on the unique fingerprint constraint.
-    A savepoint confines the rollback to just that insert."""
-    tc = _select_by_fingerprint(db, fp)
+    nothing, then one INSERT loses on the unique (project, fingerprint)
+    constraint. A savepoint confines the rollback to just that insert."""
+    tc = _select_case(db, project, fp)
     if tc is not None:
         return tc
     try:
         with db.begin_nested():
             tc = TestCase(
-                fingerprint=fp, suite=pc.suite, classname=pc.classname, name=pc.name
+                fingerprint=fp, project=project,
+                suite=pc.suite, classname=pc.classname, name=pc.name,
             )
             db.add(tc)
     except IntegrityError:
-        tc = _select_by_fingerprint(db, fp)
+        tc = _select_case(db, project, fp)
         if tc is None:  # constraint violation was something else entirely
             raise
     return tc
@@ -121,12 +124,13 @@ def rescore(db: Session, test_case: TestCase) -> None:
 
 
 def ingest_report(
-    db: Session, content: bytes, commit_sha: str, branch: str, ci_run_id: str
+    db: Session, content: bytes, commit_sha: str, branch: str,
+    ci_run_id: str, project: str,
 ) -> dict:
     """Persist one JUnit report. Returns a summary dict for the API response."""
     parsed = parse_junit_xml(content)
 
-    run = TestRun(commit_sha=commit_sha, branch=branch, ci_run_id=ci_run_id)
+    run = TestRun(commit_sha=commit_sha, branch=branch, ci_run_id=ci_run_id, project=project)
     db.add(run)
     db.flush()
 
@@ -134,7 +138,7 @@ def ingest_report(
     counts = {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
     for pc in parsed:
         fp = fingerprint(pc.suite, pc.classname, pc.name)
-        tc = _get_or_create_case(db, pc, fp)
+        tc = _get_or_create_case(db, pc, project, fp)
         tc.last_status = pc.status
         tc.last_seen_at = utcnow()
         db.add(
@@ -158,6 +162,7 @@ def ingest_report(
         "run_id": run.id,
         "commit_sha": commit_sha,
         "branch": branch,
+        "project": project,
         "ingested": len(parsed),
         "counts": counts,
         "touched_test_ids": sorted(touched),
