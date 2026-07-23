@@ -10,11 +10,12 @@ function scoreColor(score: number): string {
 }
 
 export function Leaderboard({
-  tests, selectedId, onSelect,
+  tests, selectedId, onSelect, onToggleQuarantine,
 }: {
   tests: TestCase[];
   selectedId: number | null;
   onSelect: (id: number) => void;
+  onToggleQuarantine: (t: TestCase) => void;
 }) {
   if (tests.length === 0) {
     return (
@@ -32,6 +33,7 @@ export function Leaderboard({
           <th>Flakiness</th>
           <th>Proof</th>
           <th>Last status</th>
+          <th>Quarantine</th>
         </tr>
       </thead>
       <tbody>
@@ -42,7 +44,14 @@ export function Leaderboard({
             onClick={() => onSelect(t.id)}
           >
             <td>
-              <div className="test-name">{t.name}</div>
+              <div className="test-name">
+                {t.quarantined && (
+                  <span className="badge-quarantined" title="Quarantined — runner may skip">
+                    ⏻ quarantined
+                  </span>
+                )}
+                {t.name}
+              </div>
               <div className="test-class">{t.classname || t.suite}</div>
             </td>
             <td>
@@ -75,6 +84,14 @@ export function Leaderboard({
                   <span className="badge-issue">#{t.github_issue_number}</span>
                 )}
               </span>
+            </td>
+            <td>
+              <button
+                className="quarantine-btn"
+                onClick={(e) => { e.stopPropagation(); onToggleQuarantine(t); }}
+              >
+                {t.quarantined ? "Un-quarantine" : "Quarantine"}
+              </button>
             </td>
           </tr>
         ))}
