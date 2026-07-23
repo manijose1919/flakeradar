@@ -21,3 +21,28 @@ def test_same_project_same_name_reuses_case(db_session):
     ingest.ingest_report(db_session, xml, "sha2", "main", "run2", "repo-a")
 
     assert db_session.query(TestCase).count() == 1
+
+
+def test_ingest_defaults_to_default_project(client):
+    xml = make_junit([("t", "passed")])
+    r = client.post("/api/ingest?commit_sha=s1", headers={"X-API-Key": "changeme"}, content=xml)
+    assert r.status_code == 200
+    assert r.json()["project"] == "default"
+
+
+def test_tests_and_summary_filter_by_project(client):
+    a = make_junit([("ta", "failed")])
+    b = make_junit([("tb", "failed")])
+    client.post("/api/ingest?commit_sha=s1&project=repo-a", headers={"X-API-Key": "changeme"}, content=a)
+    client.post("/api/ingest?commit_sha=s1&project=repo-b", headers={"X-API-Key": "changeme"}, content=b)
+
+    names = {t["name"] for t in client.get("/api/tests?project=repo-a").json()}
+    assert names == {"ta"}
+    assert client.get("/api/summary?project=repo-a").json()["total_tests"] == 1
+    assert client.get("/api/summary").json()["total_tests"] == 2
+
+
+def test_projects_endpoint_lists_distinct_projects(client):
+    client.post("/api/ingest?commit_sha=s1&project=repo-a", headers={"X-API-Key": "changeme"}, content=make_junit([("t", "passed")]))
+    client.post("/api/ingest?commit_sha=s1&project=repo-b", headers={"X-API-Key": "changeme"}, content=make_junit([("t", "passed")]))
+    assert sorted(client.get("/api/projects").json()) == ["repo-a", "repo-b"]

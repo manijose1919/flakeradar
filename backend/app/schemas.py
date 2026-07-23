@@ -9,6 +9,7 @@ class TestCaseOut(BaseModel):
 
     id: int
     fingerprint: str
+    project: str
     suite: str
     classname: str
     name: str
@@ -16,6 +17,8 @@ class TestCaseOut(BaseModel):
     confirmed_flake_count: int
     last_status: str
     last_seen_at: datetime
+    quarantined: bool
+    quarantined_at: datetime | None
     github_issue_number: int | None
 
 
@@ -48,6 +51,7 @@ class IngestOut(BaseModel):
     run_id: int
     commit_sha: str
     branch: str
+    project: str
     ingested: int
     counts: dict[str, int]
     touched_test_ids: list[int]

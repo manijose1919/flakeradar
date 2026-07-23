@@ -17,7 +17,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
 from . import github_integration, ingest, schemas
@@ -72,6 +72,7 @@ async def ingest_endpoint(
     commit_sha: str = Query(..., min_length=1, max_length=64),
     branch: str = Query(default="main", max_length=255),
     ci_run_id: str = Query(default="", max_length=255),
+    project: str = Query(default="default", max_length=255),
     report: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
 ):
@@ -82,7 +83,7 @@ async def ingest_endpoint(
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Report exceeds 20 MB limit")
     try:
-        result = ingest.ingest_report(db, content, commit_sha, branch, ci_run_id)
+        result = ingest.ingest_report(db, content, commit_sha, branch, ci_run_id, project)
     except ingest.IngestError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -102,19 +103,34 @@ def _file_issues_bg(test_case_ids: list[int]) -> None:
 
 
 @app.get("/api/summary", response_model=schemas.SummaryOut)
-def summary(db: Session = Depends(get_db)):
+def summary(
+    db: Session = Depends(get_db),
+    project: str | None = Query(default=None),
+):
     s = get_settings()
-    total_tests = db.scalar(select(func.count(TestCase.id))) or 0
-    flaky = db.scalar(
+
+    def case_q(q):
+        return q.where(TestCase.project == project) if project is not None else q
+
+    total_tests = db.scalar(case_q(select(func.count(TestCase.id)))) or 0
+    flaky = db.scalar(case_q(
         select(func.count(TestCase.id)).where(
             TestCase.flakiness_score >= s.flake_threshold
         )
-    ) or 0
-    confirmed = db.scalar(
+    )) or 0
+    confirmed = db.scalar(case_q(
         select(func.count(TestCase.id)).where(TestCase.confirmed_flake_count > 0)
-    ) or 0
-    runs = db.scalar(select(func.count(TestRun.id))) or 0
-    execs = db.scalar(select(func.count(TestExecution.id))) or 0
+    )) or 0
+    runs_q = select(func.count(TestRun.id))
+    if project is not None:
+        runs_q = runs_q.where(TestRun.project == project)
+    runs = db.scalar(runs_q) or 0
+    execs_q = select(func.count(TestExecution.id))
+    if project is not None:
+        execs_q = execs_q.join(
+            TestCase, TestExecution.test_case_id == TestCase.id
+        ).where(TestCase.project == project)
+    execs = db.scalar(execs_q) or 0
     return schemas.SummaryOut(
         total_tests=total_tests,
         flaky_tests=flaky,
@@ -130,13 +146,16 @@ def list_tests(
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=1000),
     min_score: float = Query(default=0.0, ge=0.0, le=1.0),
+    project: str | None = Query(default=None),
 ):
+    stmt = select(TestCase).where(TestCase.flakiness_score >= min_score)
+    if project is not None:
+        stmt = stmt.where(TestCase.project == project)
     rows = (
         db.execute(
-            select(TestCase)
-            .where(TestCase.flakiness_score >= min_score)
-            .order_by(TestCase.flakiness_score.desc(), TestCase.last_seen_at.desc())
-            .limit(limit)
+            stmt.order_by(
+                TestCase.flakiness_score.desc(), TestCase.last_seen_at.desc()
+            ).limit(limit)
         )
         .scalars()
         .all()
@@ -144,14 +163,22 @@ def list_tests(
     return rows
 
 
+@app.get("/api/projects", response_model=list[str])
+def list_projects(db: Session = Depends(get_db)):
+    return list(
+        db.scalars(select(distinct(TestCase.project)).order_by(TestCase.project)).all()
+    )
+
+
 @app.get("/api/tests/{test_id}/history", response_model=schemas.HistoryOut)
 def test_history(
     test_id: int,
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=500),
+    project: str | None = Query(default=None),
 ):
     tc = db.get(TestCase, test_id)
-    if tc is None:
+    if tc is None or (project is not None and tc.project != project):
         raise HTTPException(status_code=404, detail="Test not found")
     rows = db.execute(
         select(TestExecution, TestRun)
