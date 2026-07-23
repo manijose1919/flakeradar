@@ -1,14 +1,36 @@
 # FlakeRadar
 
-**Self-hosted flaky-test detection for small engineering teams.**
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Self-hosted](https://img.shields.io/badge/self--hosted-yes-green)
+
+**Self-hosted flaky-test detection for small engineering teams — an open-source
+alternative to BuildPulse and Datadog CI Visibility.**
 
 Every time a developer clicks "re-run job" on a red CI build, evidence of a flaky
 test evaporates. FlakeRadar captures that evidence: it ingests JUnit XML reports
-from any CI system, tracks every test's outcome across runs *keyed by commit SHA*,
-and scores flakiness statistically. A test that fails and then passes on the same
-commit is **proven** nondeterministic — no heuristics required.
+from any CI system (pytest, Jest, Vitest, Go, JUnit — anything that emits JUnit
+XML), tracks every test's outcome across runs *keyed by commit SHA*, and scores
+flakiness statistically. A test that fails and then passes on the same commit is
+**proven** nondeterministic — no heuristics required.
 
 ![FlakeRadar dashboard — flakiness leaderboard and per-test execution history](docs/dashboard.jpg)
+
+## Contents
+
+- [Who it's for](#who-its-for)
+- [What it does](#what-it-does)
+- [Quick start (local)](#quick-start-local)
+- [Quick start (Docker)](#quick-start-docker)
+- [CI integration](#ci-integration)
+- [Multi-project](#multi-project)
+- [Quarantine workflow](#quarantine-workflow)
+- [GitHub issue automation](#github-issue-automation)
+- [How scoring works](#how-scoring-works)
+- [API](#api)
+- [Architecture](#architecture)
+- [Development](#development)
+- [Roadmap](#roadmap)
 
 ## Who it's for
 
@@ -37,7 +59,12 @@ the missing middle.
   small samples are damped, and a same-commit fail→pass flip floors the score
   at 0.6 (proof beats statistics).
 - **Dashboard** — flakiness leaderboard, per-test execution timeline with
-  commit/branch/failure-message tooltips, summary tiles.
+  commit/branch/failure-message tooltips, summary tiles, and a project filter.
+- **Multi-project** — one instance serves a whole team's repositories; tests are
+  isolated per `project`, so a `test_login` in two repos never merges.
+- **Quarantine workflow** — mark an unreliable test quarantined in the dashboard;
+  your test runner queries a small API and skips it, so a known flake stops
+  breaking builds without deleting the test.
 - **GitHub issue automation (optional)** — when a test crosses the flakiness
   threshold, FlakeRadar files a GitHub issue with the evidence: failure rate,
   last 10 executions, sample stack trace. One issue per test, never spammed.
@@ -95,6 +122,35 @@ Add one step after your tests (see `samples/github-actions-snippet.yml`):
 The `run_attempt` suffix matters: it's what turns GitHub's "re-run failed jobs"
 button into labeled flake data.
 
+## Multi-project
+
+Add `&project=<name>` to the ingest URL to isolate one repository's tests from
+another's on a shared instance:
+
+```
+curl -sS -X POST "$FLAKERADAR_URL/api/ingest?commit_sha=$GITHUB_SHA&project=$GITHUB_REPOSITORY" \
+  -H "X-API-Key: $FLAKERADAR_TOKEN" --data-binary @junit.xml
+```
+
+Omitting `project` files under `default`, so existing integrations keep working.
+The dashboard's project selector filters the leaderboard and tiles; `All` spans
+every project.
+
+## Quarantine workflow
+
+Mark an unreliable test **Quarantine** in the dashboard. Your test runner then
+queries the quarantine list before a run and skips those tests:
+
+```
+curl -sS "$FLAKERADAR_URL/api/quarantine?project=$GITHUB_REPOSITORY" \
+  -H "X-API-Key: $FLAKERADAR_TOKEN"
+# -> [{"suite","classname","name","fingerprint","quarantined_at"}, ...]
+```
+
+A runner matches each JSON item on `classname` + `name` (the fields it already
+knows at collection time) to decide what to skip. Quarantining is a deliberate,
+reversible human action — FlakeRadar never auto-skips a test on its own.
+
 ## GitHub issue automation
 
 Set in `.env`:
@@ -127,10 +183,13 @@ For each test, over its last 50 executions (configurable):
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `POST /api/ingest?commit_sha=&branch=&ci_run_id=` | `X-API-Key` | Upload JUnit XML (raw body or multipart `report` field, ≤20 MB) |
-| `GET /api/tests?limit=&min_score=` | — | Flakiness leaderboard |
-| `GET /api/tests/{id}/history?limit=` | — | Execution history for one test |
-| `GET /api/summary` | — | Dashboard tiles |
+| `POST /api/ingest?commit_sha=&branch=&ci_run_id=&project=` | `X-API-Key` | Upload JUnit XML (raw body or multipart `report` field, ≤20 MB) |
+| `GET /api/tests?limit=&min_score=&project=` | — | Flakiness leaderboard |
+| `GET /api/tests/{id}/history?limit=&project=` | — | Execution history for one test |
+| `GET /api/summary?project=` | — | Dashboard tiles |
+| `GET /api/projects` | — | Distinct project names |
+| `POST /api/tests/{id}/quarantine` | — | Toggle quarantine (body `{"quarantined": bool}`) |
+| `GET /api/quarantine?project=` | `X-API-Key` | Quarantined tests for a project (for the test runner) |
 | `GET /api/health` | — | Liveness |
 
 Interactive docs at `/docs` (OpenAPI, auto-generated).
@@ -144,18 +203,22 @@ backend/   FastAPI + SQLAlchemy 2.0 + SQLite (swap DATABASE_URL for Postgres)
     scoring.py    flip score + same-SHA proof (pure functions, unit-tested)
     github_integration.py  issue filing, background, fail-safe
     main.py       API routes + static hosting of frontend/dist
-  tests/          35 tests (pytest): scoring, API, GitHub mocking
+    migrate.py    startup Alembic upgrade (stamps pre-Alembic databases)
+  migrations/     Alembic revisions (0001 baseline, 0002 project + quarantine)
+  tests/          48 tests (pytest): scoring, API, GitHub, migration, multi-project, quarantine
 frontend/  React 18 + Vite + TypeScript, zero runtime chart deps (hand-rolled SVG)
 samples/   CI snippet + demo-data simulator
 ```
 
 Design notes:
 
-- Schema is created with `Base.metadata.create_all` on startup — deliberate for
-  a v1 single-table-growth app; introduce Alembic when the schema first changes.
-- The read APIs are unauthenticated by design (dashboard is expected to sit on
-  a private network / behind a reverse proxy). The write path is token-gated
-  with constant-time comparison.
+- Schema changes go through Alembic; migrations run automatically on startup,
+  and a database created by the pre-Alembic `create_all` path is stamped at
+  baseline before upgrading (see `app/migrate.py`).
+- The read APIs and the quarantine toggle are unauthenticated by design
+  (dashboard is expected to sit on a private network / behind a reverse proxy).
+  Boundary-crossing writes from external CI — ingest and the quarantine list —
+  are token-gated with constant-time comparison.
 - Execution-status marks in the UI are shape-coded (circle/square/diamond/hollow)
   because pass-green vs fail-red collapses to ΔE 4.1 under deuteranopia —
   color never carries meaning alone.
@@ -164,7 +227,7 @@ Design notes:
 
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 37 tests: scoring, API, GitHub mocking
+.venv/Scripts/python -m pytest        # 48 tests: scoring, API, GitHub, migration, multi-project, quarantine
 cd ../frontend
 npm run build                         # strict TypeScript is the frontend gate
 ```
@@ -175,10 +238,14 @@ five stable tests — a quick way to see the scoring behave.
 
 ## Roadmap
 
-- **Quarantine workflow** — mark a test quarantined in the UI; expose an API the
-  test runner can query to auto-skip quarantined tests.
+Delivered in v1.1: quarantine workflow, multi-project isolation, Alembic
+migrations. Still ahead:
+
 - **Branch filtering** in the dashboard (data is already recorded per branch).
 - **Issue lifecycle** — auto-close the GitHub issue after N consecutive stable runs.
+- **Per-project GitHub repos** — issue filing is currently global (one repo for
+  all projects).
+- **Test-runner plugin** — a pytest/Vitest plugin that consumes `/api/quarantine`
+  automatically (today the contract is documented; the glue is yours to write).
 - **Retention** — pruning job for old executions.
-- **Alembic migrations** — introduced at the first schema change.
 - **Frontend test suite** (Vitest + Testing Library) as the UI grows.
