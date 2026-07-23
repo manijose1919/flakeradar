@@ -9,7 +9,10 @@ Design notes:
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, TypeDecorator
+from sqlalchemy import (
+    Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text,
+    TypeDecorator, UniqueConstraint, text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -43,9 +46,14 @@ class Base(DeclarativeBase):
 
 class TestCase(Base):
     __tablename__ = "test_cases"
+    __table_args__ = (
+        UniqueConstraint("project", "fingerprint",
+                         name="uq_test_cases_project_fingerprint"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    fingerprint: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    fingerprint: Mapped[str] = mapped_column(String(40), index=True)
+    project: Mapped[str] = mapped_column(String(255), server_default="default", index=True)
     suite: Mapped[str] = mapped_column(String(255), default="")
     classname: Mapped[str] = mapped_column(String(255), default="")
     name: Mapped[str] = mapped_column(String(500))
@@ -55,6 +63,10 @@ class TestCase(Base):
     confirmed_flake_count: Mapped[int] = mapped_column(Integer, default=0)
     last_status: Mapped[str] = mapped_column(String(16), default="passed")
     last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    # Manual quarantine: a human marks a test skippable by the runner.
+    quarantined: Mapped[bool] = mapped_column(Boolean, server_default=text("0"), default=False)
+    quarantined_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
 
     # GitHub issue automation bookkeeping.
     github_issue_number: Mapped[int | None] = mapped_column(Integer, default=None)
@@ -70,6 +82,7 @@ class TestRun(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     commit_sha: Mapped[str] = mapped_column(String(64), index=True)
     branch: Mapped[str] = mapped_column(String(255), default="main")
+    project: Mapped[str] = mapped_column(String(255), server_default="default", default="default")
     ci_run_id: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
