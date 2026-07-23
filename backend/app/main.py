@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session
 
 from . import github_integration, ingest, schemas
 from .config import get_settings
-from .db import engine, get_db
-from .models import Base, TestCase, TestExecution, TestRun
+from .db import get_db
+from .migrate import run_migrations
+from .models import TestCase, TestExecution, TestRun
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("flakeradar")
@@ -31,7 +32,7 @@ logger = logging.getLogger("flakeradar")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(engine)
+    run_migrations()
     if get_settings().api_token == "changeme":
         logger.warning(
             "FLAKERADAR_API_TOKEN is the default 'changeme' — set a real token."
