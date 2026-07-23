@@ -1,4 +1,6 @@
 """Shared fixtures: every test gets a fresh in-memory SQLite DB."""
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -35,8 +37,13 @@ def client(db_session):
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
-        yield c
+    # The app lifespan runs Alembic against the real configured (on-disk) engine,
+    # which is irrelevant here: db_session already built the schema on an isolated
+    # in-memory engine and get_db is overridden to use it. No-op the migration so
+    # tests never touch a real database file.
+    with patch("app.main.run_migrations"):
+        with TestClient(app) as c:
+            yield c
     app.dependency_overrides.clear()
 
 

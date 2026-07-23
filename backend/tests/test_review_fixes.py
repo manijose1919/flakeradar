@@ -28,21 +28,21 @@ def test_datetimes_serialize_with_utc_offset(client, db_session):
 
 
 def test_concurrent_new_fingerprint_race_recovers(db_session, monkeypatch):
-    real = ingest_mod._select_by_fingerprint
+    real = ingest_mod._select_case
     state = {"first": True}
 
-    def racy(db, fp):
+    def racy(db, project, fp):
         if state["first"]:
             state["first"] = False
             # Simulate a competing ingest committing the row between our
             # SELECT (which sees nothing) and our INSERT.
-            db.add(TestCase(fingerprint=fp, suite="e2e", classname="c", name="t1"))
+            db.add(TestCase(fingerprint=fp, project=project, suite="e2e", classname="c", name="t1"))
             db.flush()
             return None
-        return real(db, fp)
+        return real(db, project, fp)
 
-    monkeypatch.setattr(ingest_mod, "_select_by_fingerprint", racy)
-    result = ingest_report(db_session, make_junit([("t1", "passed")]), "sha", "main", "")
+    monkeypatch.setattr(ingest_mod, "_select_case", racy)
+    result = ingest_report(db_session, make_junit([("t1", "passed")]), "sha", "main", "", "default")
     assert result["ingested"] == 1
 
     # Exactly one TestCase row survived; the execution attached to it.

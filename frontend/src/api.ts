@@ -3,6 +3,7 @@
 export interface TestCase {
   id: number;
   fingerprint: string;
+  project: string;
   suite: string;
   classname: string;
   name: string;
@@ -10,6 +11,8 @@ export interface TestCase {
   confirmed_flake_count: number;
   last_status: string;
   last_seen_at: string;
+  quarantined: boolean;
+  quarantined_at: string | null;
   github_issue_number: number | null;
 }
 
@@ -44,7 +47,27 @@ async function getJson<T>(url: string): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
-export const fetchSummary = () => getJson<Summary>("/api/summary");
-export const fetchTests = () => getJson<TestCase[]>("/api/tests?limit=200");
+const projectParam = (project?: string) =>
+  project && project !== "All" ? `project=${encodeURIComponent(project)}` : "";
+
+export const fetchSummary = (project?: string) => {
+  const q = projectParam(project);
+  return getJson<Summary>(`/api/summary${q ? `?${q}` : ""}`);
+};
+export const fetchTests = (project?: string) => {
+  const q = projectParam(project);
+  return getJson<TestCase[]>(`/api/tests?limit=200${q ? `&${q}` : ""}`);
+};
 export const fetchHistory = (id: number) =>
   getJson<History>(`/api/tests/${id}/history?limit=60`);
+export const fetchProjects = () => getJson<string[]>("/api/projects");
+
+export async function setQuarantine(id: number, quarantined: boolean): Promise<TestCase> {
+  const resp = await fetch(`/api/tests/${id}/quarantine`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quarantined }),
+  });
+  if (!resp.ok) throw new Error(`quarantine ${id} -> ${resp.status}`);
+  return resp.json() as Promise<TestCase>;
+}

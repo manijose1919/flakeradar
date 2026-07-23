@@ -8,8 +8,8 @@ from tests.conftest import make_junit
 
 def _make_flaky_test(db):
     """Ingest a fail + pass on the same SHA -> confirmed flake over threshold."""
-    ingest_report(db, make_junit([("t_flaky", "failed")]), "sha1", "main", "")
-    result = ingest_report(db, make_junit([("t_flaky", "passed")]), "sha1", "main", "")
+    ingest_report(db, make_junit([("t_flaky", "failed")]), "sha1", "main", "", "default")
+    result = ingest_report(db, make_junit([("t_flaky", "passed")]), "sha1", "main", "", "default")
     return result["touched_test_ids"]
 
 
@@ -69,7 +69,7 @@ def test_does_not_refile_existing_issue(db_session, monkeypatch):
 
 def test_below_threshold_not_filed(db_session, monkeypatch):
     result = ingest_report(
-        db_session, make_junit([("t_ok", "passed")]), "sha1", "main", ""
+        db_session, make_junit([("t_ok", "passed")]), "sha1", "main", "", "default"
     )
     _configure(monkeypatch)
     mock_client = MagicMock()
@@ -96,9 +96,9 @@ def test_api_error_never_raises(db_session, monkeypatch):
 
 def test_rate_limit_stops_batch(db_session, monkeypatch):
     ids = _make_flaky_test(db_session)
-    ingest_report(db_session, make_junit([("t_flaky2", "failed")]), "sha9", "main", "")
+    ingest_report(db_session, make_junit([("t_flaky2", "failed")]), "sha9", "main", "", "default")
     result = ingest_report(
-        db_session, make_junit([("t_flaky2", "passed")]), "sha9", "main", ""
+        db_session, make_junit([("t_flaky2", "passed")]), "sha9", "main", "", "default"
     )
     all_ids = ids + result["touched_test_ids"]
     _configure(monkeypatch)
