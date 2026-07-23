@@ -55,3 +55,17 @@ class IngestOut(BaseModel):
     ingested: int
     counts: dict[str, int]
     touched_test_ids: list[int]
+
+
+class QuarantineIn(BaseModel):
+    quarantined: bool
+
+
+class QuarantineItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    suite: str
+    classname: str
+    name: str
+    fingerprint: str
+    quarantined_at: datetime | None

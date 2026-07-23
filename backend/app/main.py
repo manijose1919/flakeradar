@@ -24,7 +24,7 @@ from . import github_integration, ingest, schemas
 from .config import get_settings
 from .db import get_db
 from .migrate import run_migrations
-from .models import TestCase, TestExecution, TestRun
+from .models import TestCase, TestExecution, TestRun, utcnow
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("flakeradar")
@@ -201,6 +201,39 @@ def test_history(
         for e, r in rows
     ]
     return schemas.HistoryOut(test=schemas.TestCaseOut.model_validate(tc), executions=executions)
+
+
+@app.post("/api/tests/{test_id}/quarantine", response_model=schemas.TestCaseOut)
+def set_quarantine(
+    test_id: int,
+    body: schemas.QuarantineIn,
+    db: Session = Depends(get_db),
+):
+    tc = db.get(TestCase, test_id)
+    if tc is None:
+        raise HTTPException(status_code=404, detail="Test not found")
+    tc.quarantined = body.quarantined
+    tc.quarantined_at = utcnow() if body.quarantined else None
+    db.commit()
+    db.refresh(tc)
+    return tc
+
+
+@app.get(
+    "/api/quarantine",
+    response_model=list[schemas.QuarantineItem],
+    dependencies=[Depends(require_token)],
+)
+def quarantine_list(
+    db: Session = Depends(get_db),
+    project: str = Query(default="default", max_length=255),
+):
+    rows = db.execute(
+        select(TestCase)
+        .where(TestCase.project == project, TestCase.quarantined.is_(True))
+        .order_by(TestCase.name)
+    ).scalars().all()
+    return rows
 
 
 # Serve the built frontend (frontend/dist) if present — single-container self-host.
