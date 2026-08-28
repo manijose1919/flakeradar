@@ -24,4 +24,5 @@ FlakeRadar's security posture is deliberate and documented:
   the reverse proxy if your dashboard is not on a trusted network.
 - **Secrets** (`FLAKERADAR_API_TOKEN`, `FLAKERADAR_GITHUB_TOKEN`) live only in
   `.env`, which is git-ignored. Never commit them. Rotate the API token if it
-  is ever exposed.
+  is ever exposed. The process **refuses to start** on the shipped default
+  token (`changeme`) unless `FLAKERADAR_ALLOW_INSECURE=1` is set.

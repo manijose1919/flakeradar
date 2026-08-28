@@ -1,7 +1,10 @@
 """Application configuration, sourced from environment variables (.env supported)."""
+import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_INSECURE_TOKEN = "changeme"
 
 
 class Settings(BaseSettings):
@@ -10,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     # Auth token CI systems must send in the X-API-Key header when ingesting.
-    api_token: str = "changeme"
+    api_token: str = DEFAULT_INSECURE_TOKEN
 
     database_url: str = "sqlite:///./data/flakeradar.db"
 
@@ -30,3 +33,20 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def assert_secure_token(token: str) -> None:
+    """Refuse to boot on the shipped default token unless explicitly allowed.
+
+    Tests and throwaway local demos set ``FLAKERADAR_ALLOW_INSECURE=1``.
+    Docker/production must set a real ``FLAKERADAR_API_TOKEN``.
+    """
+    if token != DEFAULT_INSECURE_TOKEN:
+        return
+    if os.getenv("FLAKERADAR_ALLOW_INSECURE", "").strip() == "1":
+        return
+    raise RuntimeError(
+        "FLAKERADAR_API_TOKEN is still the default 'changeme'. Set a real "
+        "token (see .env.example) or set FLAKERADAR_ALLOW_INSECURE=1 for a "
+        "throwaway local demo."
+    )
