@@ -127,3 +127,17 @@ def test_summary(client):
     assert data["total_executions"] == 4
     assert data["confirmed_flaky_tests"] == 1
     assert data["flaky_tests"] == 1
+
+
+def test_default_token_refused_without_insecure_flag(monkeypatch):
+    from app.config import assert_secure_token
+
+    monkeypatch.delenv("FLAKERADAR_ALLOW_INSECURE", raising=False)
+    try:
+        assert_secure_token("changeme")
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "changeme" in str(exc)
+    assert_secure_token("a-real-token")
+    monkeypatch.setenv("FLAKERADAR_ALLOW_INSECURE", "1")
+    assert_secure_token("changeme")

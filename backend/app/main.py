@@ -21,7 +21,7 @@ from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
 from . import github_integration, ingest, schemas
-from .config import get_settings
+from .config import get_settings, assert_secure_token, DEFAULT_INSECURE_TOKEN
 from .db import get_db
 from .migrate import run_migrations
 from .models import TestCase, TestExecution, TestRun, utcnow
@@ -33,7 +33,9 @@ logger = logging.getLogger("flakeradar")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_migrations()
-    if get_settings().api_token == "changeme":
+    settings = get_settings()
+    assert_secure_token(settings.api_token)
+    if settings.api_token == DEFAULT_INSECURE_TOKEN:
         logger.warning(
             "FLAKERADAR_API_TOKEN is the default 'changeme' — set a real token."
         )

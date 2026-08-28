@@ -1,5 +1,8 @@
 """Shared fixtures: every test gets a fresh in-memory SQLite DB."""
+import os
 from unittest.mock import patch
+
+os.environ.setdefault("FLAKERADAR_ALLOW_INSECURE", "1")
 
 import pytest
 from fastapi.testclient import TestClient
